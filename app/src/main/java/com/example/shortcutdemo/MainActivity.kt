@@ -113,6 +113,7 @@
 
 package com.example.shortcutdemo
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -122,6 +123,14 @@ import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.ResponseBody
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -152,6 +161,7 @@ class MainActivity : AppCompatActivity() {
                     // Request the permission using ACTION_MANAGE_OVERLAY_PERMISSION
                     val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
                     intent.data = Uri.parse("package:$packageName")
+
                     startActivityForResult(intent, OVERLAY_PERMISSION_REQ_CODE)
                     Toast.makeText(this, "Please grant the permission", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
@@ -213,4 +223,27 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
+}
+fun uploadVideoFile(context: Context, videoPath: String) {
+    val file = File(videoPath)
+    val requestFile = file.asRequestBody("video/mp4".toMediaTypeOrNull())
+    val body = MultipartBody.Part.createFormData("video", file.name, requestFile)
+
+    RetrofitClient.api.uploadVideo(body).enqueue(object : Callback<ResponseBody> {
+        override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
+            if (response.isSuccessful) {
+                val resultText = response.body()?.string()
+                saveTranscriptLocally(context, resultText)
+            }
+        }
+
+        override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+            t.printStackTrace()
+        }
+    })
+}
+
+fun saveTranscriptLocally(context: Context, text: String?) {
+    val file = File(context.filesDir, "transcription.txt")
+    file.writeText(text ?: "")
 }

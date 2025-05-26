@@ -42,6 +42,10 @@
     <!-- Optional audio recording permission (if you need audio) -->
     <!-- <uses-permission android:name="android.permission.RECORD_AUDIO" /> -->
 
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
