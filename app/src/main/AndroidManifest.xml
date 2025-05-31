@@ -6,41 +6,10 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-<!--    <uses-permission android:name="android.permission.RECORD_AUDIO"/>-->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+<!--    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>-->
 <!--    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>-->
-<!--    <uses-permission android:name="android.permission.RECORD_AUDIO" />-->
-<!--    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"-->
-<!--        android:maxSdkVersion="28" />-->
-<!--    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"-->
-<!--        android:maxSdkVersion="32" />-->
-    <uses-permission android:name = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />-->
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />-->
-
-<!--    <uses-permission android:name="android.permission.RECORD_AUDIO" />-->
-
-    <!-- Updated permissions for modern Android versions -->
-
-    <!-- Base permissions needed for recording -->
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />-->
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />-->
-
-    <!-- Storage permissions based on Android version -->
-    <!-- For Android 10 (API 29) and above -->
-<!--    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" android:maxSdkVersion="32" />-->
-<!--    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" android:maxSdkVersion="32" />-->
-
-    <!-- For Android 13 (API 33) and above -->
-<!--    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />-->
-
-<!--    &lt;!&ndash; Legacy storage permissions (for Android 9 and below) &ndash;&gt;-->
-<!--    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"-->
-<!--        android:maxSdkVersion="28" />-->
-<!--    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"-->
-<!--        android:maxSdkVersion="32" />-->
-
-    <!-- Optional audio recording permission (if you need audio) -->
-    <!-- <uses-permission android:name="android.permission.RECORD_AUDIO" /> -->
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
         android:allowBackup="true"
@@ -52,6 +21,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ShortCutDemo"
         tools:targetApi="31">
+
         <service
             android:name=".FloatingButtonService"
             android:foregroundServiceType="specialUse">
@@ -60,31 +30,27 @@
                 android:value="Persistent floating button that allows quick access to app functionality from anywhere" />
         </service>
 
-<!--        <service android:name=".ScreenRecordingService"-->
-<!--            android:enabled="true"-->
-<!--            android:exported="false"-->
-<!--            android:permission="android.permission.BIND_JOB_SERVICE"/>-->
+        <!-- New working screen record service -->
+        <service
+            android:name=".ScreenRecordService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
-
-<!--        <activity android:name=".ScreenCaptureActivity"-->
-<!--            android:launchMode="singleTask"-->
-<!--            android:theme="@android:style/Theme.NoDisplay" />-->
+        <!-- Keep the old service commented out for reference -->
+        <!--
         <service
             android:name=".ScreenRecordingService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
-
-        <!-- Ensure you have the ScreenCaptureActivity declared -->
-<!--        <activity-->
-<!--            android:name=".ScreenCaptureActivity"-->
-<!--            android:theme="@android:style/Theme.Translucent.NoTitleBar"-->
-<!--            android:exported="false" />-->
+        -->
 
         <activity
             android:name=".ScreenCaptureRequestActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -102,81 +68,3 @@
         </activity>
     </application>
 </manifest>
-
-
-<!--<?xml version="1.0" encoding="utf-8"?>-->
-<!--<manifest xmlns:android="http://schemas.android.com/apk/res/android"-->
-<!--    xmlns:tools="http://schemas.android.com/tools">-->
-<!--    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />-->
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />-->
-<!--    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM" />-->
-
-<!--    <application-->
-<!--        android:allowBackup="true"-->
-<!--        android:dataExtractionRules="@xml/data_extraction_rules"-->
-<!--        android:fullBackupContent="@xml/backup_rules"-->
-<!--        android:icon="@mipmap/ic_launcher"-->
-<!--        android:label="@string/app_name"-->
-<!--        android:roundIcon="@mipmap/ic_launcher_round"-->
-<!--        android:supportsRtl="true"-->
-<!--        android:theme="@style/Theme.ShortCutDemo"-->
-<!--        tools:targetApi="31">-->
-<!--        <service-->
-<!--            android:name=".FloatingButtonService"-->
-<!--            android:foregroundServiceType="system" />-->
-<!--        <activity-->
-<!--            android:name=".FloatingWindowActivity"-->
-<!--            android:excludeFromRecents="true"-->
-<!--            android:exported="true"-->
-<!--            android:label="@string/app_name"-->
-<!--            android:theme="@style/Theme.AppCompat.Dialog">-->
-<!--            <intent-filter>-->
-<!--                <action android:name="android.intent.action.MAIN" />-->
-<!--                <category android:name="android.intent.category.LAUNCHER" />-->
-<!--            </intent-filter>-->
-<!--        </activity>-->
-
-<!--        <activity-->
-<!--            android:name=".MainActivity"-->
-<!--            android:exported="true">-->
-<!--            <intent-filter>-->
-<!--                <action android:name="android.intent.action.MAIN" />-->
-<!--                <category android:name="android.intent.category.LAUNCHER" />-->
-<!--            </intent-filter>-->
-<!--        </activity>-->
-<!--    </application>-->
-<!--</manifest>-->
-
-<!--&lt;!&ndash;<?xml version="1.0" encoding="utf-8"?>&ndash;&gt;-->
-<!--&lt;!&ndash;<manifest xmlns:android="http://schemas.android.com/apk/res/android"&ndash;&gt;-->
-<!--&lt;!&ndash;    xmlns:tools="http://schemas.android.com/tools">&ndash;&gt;-->
-<!--&lt;!&ndash;    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />&ndash;&gt;-->
-<!--&lt;!&ndash;    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />&ndash;&gt;-->
-
-<!--&lt;!&ndash;    <application&ndash;&gt;-->
-<!--&lt;!&ndash;        android:allowBackup="true"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:dataExtractionRules="@xml/data_extraction_rules"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:fullBackupContent="@xml/backup_rules"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:icon="@mipmap/ic_launcher"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:label="@string/app_name"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:roundIcon="@mipmap/ic_launcher_round"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:supportsRtl="true"&ndash;&gt;-->
-<!--&lt;!&ndash;        android:theme="@style/Theme.ShortCutDemo"&ndash;&gt;-->
-<!--&lt;!&ndash;        tools:targetApi="31">&ndash;&gt;-->
-<!--&lt;!&ndash;        <service android:name=".FloatingButtonService" />&ndash;&gt;-->
-<!--&lt;!&ndash;        <activity&ndash;&gt;-->
-<!--&lt;!&ndash;            android:name=".FloatingWindowActivity"&ndash;&gt;-->
-<!--&lt;!&ndash;            android:excludeFromRecents="true"&ndash;&gt;-->
-
-<!--&lt;!&ndash;            android:exported="true"&ndash;&gt;-->
-<!--&lt;!&ndash;            android:label="@string/app_name"&ndash;&gt;-->
-<!--&lt;!&ndash;            android:theme="@style/Theme.AppCompat.Dialog">&ndash;&gt;-->
-<!--&lt;!&ndash;            <intent-filter>&ndash;&gt;-->
-<!--&lt;!&ndash;                <action android:name="android.intent.action.MAIN" />&ndash;&gt;-->
-
-<!--&lt;!&ndash;                <category android:name="android.intent.category.LAUNCHER" />&ndash;&gt;-->
-<!--&lt;!&ndash;            </intent-filter>&ndash;&gt;-->
-<!--&lt;!&ndash;        </activity>&ndash;&gt;-->
-<!--&lt;!&ndash;    </application>&ndash;&gt;-->
-
-<!--&lt;!&ndash;</manifest>&ndash;&gt;-->
