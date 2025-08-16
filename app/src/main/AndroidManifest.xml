@@ -51,11 +51,6 @@
         -->
 
         <activity
-            android:name=".ScreenCaptureRequestActivity"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:exported="false" />
-
-        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
