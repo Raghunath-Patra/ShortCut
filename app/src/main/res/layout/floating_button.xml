@@ -1,14 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content">
+    android:id="@+id/floatingButton"
+    android:layout_width="32dp"
+    android:layout_height="32dp"
+    android:background="#01000000"
+    android:clickable="true"
+    android:focusable="true"
+    android:clipToPadding="false"
+    android:contentDescription="Shortcut button">
+
+    <!-- Visual indicator for drag gesture -->
 
     <View
-        android:id="@+id/floatingButton"
-        android:layout_width="12dp"
-        android:layout_height="78dp"
-        android:background="@drawable/sidebar_background"
-        android:alpha="0.7" />
-        
+        android:id="@+id/circleBackground"
+        android:layout_width="8dp"
+        android:layout_height="32dp"
+        android:background="@drawable/rectangular_border_background" />
+
+    <ImageView
+        android:id="@+id/shortcutIcon"
+        android:layout_width="32dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:alpha="0"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_shortcut" />
+
+<!--    <View-->
+<!--        android:id="@+id/dragIndicator"-->
+<!--        android:layout_width="16dp"-->
+<!--        android:layout_height="3dp"-->
+<!--        android:layout_gravity="center_horizontal|bottom"-->
+<!--        android:layout_marginBottom="0dp"-->
+<!--        android:background="@drawable/drag_indicator_background"-->
+<!--        android:alpha="0.6" />-->
+
 </FrameLayout>
