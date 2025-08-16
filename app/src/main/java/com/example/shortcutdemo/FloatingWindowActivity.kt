@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
@@ -146,5 +147,16 @@ class FloatingWindowActivity : AppCompatActivity() {
         super.onResume()
         // Update button states when activity resumes
         updateButtonStates()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        // Notify the service that the window is closing
+        val serviceIntent = Intent(this, FloatingButtonService::class.java)
+        serviceIntent.putExtra("window_closed", true)
+        startService(serviceIntent)
+
+        Log.d("FloatingWindowActivity", "Window destroyed, notified service")
     }
 }

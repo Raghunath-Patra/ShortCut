@@ -1,39 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/floatingButton"
     android:layout_width="32dp"
-    android:layout_height="32dp"
+    android:layout_height="48dp"
     android:background="#01000000"
     android:clickable="true"
     android:focusable="true"
     android:clipToPadding="false"
     android:contentDescription="Shortcut button">
 
-    <!-- Visual indicator for drag gesture -->
-
+    <!-- Expandable background that changes width -->
     <View
         android:id="@+id/circleBackground"
         android:layout_width="8dp"
-        android:layout_height="32dp"
-        android:background="@drawable/rectangular_border_background" />
+        android:layout_height="48dp"
+        android:layout_gravity="start|center_vertical"
+        android:background="@drawable/transparent_border_background"
+        android:transformPivotX="0dp"
+        android:transformPivotY="24dp" />
 
+    <!-- Expanded state background with light color -->
+    <View
+        android:id="@+id/expandedBackground"
+        android:layout_width="12dp"
+        android:layout_height="48dp"
+        android:layout_gravity="start|center_vertical"
+        android:background="@drawable/expanded_background"
+        android:transformPivotX="0dp"
+        android:transformPivotY="24dp"
+        android:alpha="0"
+        android:visibility="gone" />
+
+    <!-- Icon that appears on interaction -->
     <ImageView
         android:id="@+id/shortcutIcon"
-        android:layout_width="32dp"
-        android:layout_height="wrap_content"
+        android:layout_width="20dp"
+        android:layout_height="48dp"
         android:layout_gravity="center"
+        android:layout_marginStart="2dp"
         android:alpha="0"
         android:importantForAccessibility="no"
-        android:src="@drawable/ic_shortcut" />
+        android:src="@drawable/ic_shortcut"
+        android:scaleType="centerInside"
+        app:tint="#E0FFFFFF" />
 
-<!--    <View-->
-<!--        android:id="@+id/dragIndicator"-->
-<!--        android:layout_width="16dp"-->
-<!--        android:layout_height="3dp"-->
-<!--        android:layout_gravity="center_horizontal|bottom"-->
-<!--        android:layout_marginBottom="0dp"-->
-<!--        android:background="@drawable/drag_indicator_background"-->
-<!--        android:alpha="0.6" />-->
+    <!-- Visual hint for drag gesture -->
+    <!-- <View
+        android:id="@+id/dragHint"
+        android:layout_width="1dp"
+        android:layout_height="6dp"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="1dp"
+        android:background="#80808080"
+        android:alpha="0.8" /> -->
 
 </FrameLayout>

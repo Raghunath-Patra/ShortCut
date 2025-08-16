@@ -134,9 +134,13 @@ class ScreenRecordService: Service() {
     }
 
     private fun stopRecording() {
-        mediaRecorder.stop()
-        mediaProjection?.stop()
-        mediaRecorder.reset()
+        try {
+            mediaRecorder.stop()
+            mediaProjection?.stop()
+            mediaRecorder.reset()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun stopService() {
@@ -176,14 +180,34 @@ class ScreenRecordService: Service() {
             maxWidth = width,
             maxHeight = height
         )
+
         with(mediaRecorder) {
+            // Set video source first
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
+
+            // Set audio source for system audio (requires Android 10+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+            }
+
+            // Set output format
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(outputFile)
+
+            // Configure video settings
             setVideoSize(scaledWidth, scaledHeight)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setVideoEncodingBitRate(VIDEO_BIT_RATE_KILOBITS * 1000)
             setVideoFrameRate(VIDEO_FRAME_RATE)
+
+            // Configure audio settings (if supported)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(AUDIO_BIT_RATE)
+                setAudioSamplingRate(AUDIO_SAMPLE_RATE)
+                setAudioChannels(AUDIO_CHANNELS)
+            }
+
             prepare()
         }
     }
@@ -209,10 +233,14 @@ class ScreenRecordService: Service() {
     }
 
     private fun releaseResources() {
-        mediaRecorder.release()
-        virtualDisplay?.release()
-        mediaProjection?.unregisterCallback(mediaProjectionCallback)
-        mediaProjection = null
+        try {
+            mediaRecorder.release()
+            virtualDisplay?.release()
+            mediaProjection?.unregisterCallback(mediaProjectionCallback)
+            mediaProjection = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -225,6 +253,11 @@ class ScreenRecordService: Service() {
 
         private const val VIDEO_FRAME_RATE = 30
         private const val VIDEO_BIT_RATE_KILOBITS = 512
+
+        // Audio configuration constants
+        private const val AUDIO_BIT_RATE = 128000 // 128 kbps
+        private const val AUDIO_SAMPLE_RATE = 44100 // 44.1 kHz
+        private const val AUDIO_CHANNELS = 2 // Stereo
 
         const val START_RECORDING = "START_RECORDING"
         const val STOP_RECORDING = "STOP_RECORDING"

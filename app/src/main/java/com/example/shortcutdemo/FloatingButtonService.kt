@@ -34,6 +34,7 @@ class FloatingButtonService : Service() {
     private var initialTouchY: Float = 0f
     private var isDragging: Boolean = false
     private var hasMoved: Boolean = false
+    private var isRepositioning: Boolean = false // Track if user is repositioning vertically
 
     // Screen dimensions
     private var screenWidth: Int = 0
@@ -46,16 +47,25 @@ class FloatingButtonService : Service() {
     // Views
     private lateinit var floatingButton: View
     private lateinit var shortcutIcon: View
+    private lateinit var circleBackground: View
+    private lateinit var expandedBackground: View
+    
+    // Window state tracking
+    private var isWindowLaunched = false
 
     companion object {
         private const val CHANNEL_ID = "floating_shortcut_channel"
         private const val NOTIFICATION_ID = 1
         private const val TAG = "FloatingButtonService"
         private const val CLICK_DRAG_TOLERANCE = 20f
-        private const val DRAG_INWARD_THRESHOLD = 100f
+        private const val DRAG_INWARD_THRESHOLD = 50f
+        private const val VERTICAL_DRAG_THRESHOLD = 30f // Threshold to detect vertical repositioning
         private const val AUTO_HIDE_DELAY = 3000L // 3 seconds
         private const val EDGE_MARGIN = 8 // Margin from screen edge
-        private const val HIDDEN_OFFSET = 40 // How much to hide when at edge
+        private const val HIDDEN_OFFSET = 24 // How much to hide when at edge (3/4 of button width)
+        private const val BUTTON_WIDTH_COLLAPSED = 32 // Button width when collapsed (dp)
+        private const val BUTTON_WIDTH_EXPANDED = 48 // Button width when expanded (dp)
+        private const val BUTTON_HEIGHT = 48 // Button height (dp)
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -101,6 +111,8 @@ class FloatingButtonService : Service() {
             // Get references to views
             floatingButton = floatingButtonView.findViewById(R.id.floatingButton)
             shortcutIcon = floatingButtonView.findViewById(R.id.shortcutIcon)
+            circleBackground = floatingButtonView.findViewById(R.id.circleBackground)
+            expandedBackground = floatingButtonView.findViewById(R.id.expandedBackground)
 
             // Get screen dimensions
             val displayMetrics = DisplayMetrics()
@@ -121,10 +133,10 @@ class FloatingButtonService : Service() {
                 PixelFormat.TRANSLUCENT
             )
 
-            // Initial position (left edge, center vertically)
+            // Initial position (left edge, center vertically) - always on left
             layoutParams.gravity = Gravity.TOP or Gravity.START
-            layoutParams.x = -HIDDEN_OFFSET // Start partially hidden
-            layoutParams.y = screenHeight / 2 - 50 // Center vertically
+            layoutParams.x = -HIDDEN_OFFSET // Start partially hidden on left edge
+            layoutParams.y = screenHeight / 2 - (BUTTON_HEIGHT / 2) // Center vertically
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 layoutParams.layoutInDisplayCutoutMode = 
@@ -148,9 +160,9 @@ class FloatingButtonService : Service() {
         floatingButton.setOnTouchListener { view, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Cancel auto-hide and show button fully
+                    // Cancel auto-hide and expand button
                     cancelAutoHide()
-                    showButton()
+                    expandButton()
 
                     // Record initial positions
                     initialX = layoutParams.x
@@ -160,6 +172,7 @@ class FloatingButtonService : Service() {
                     
                     isDragging = false
                     hasMoved = false
+                    isRepositioning = false
 
                     // Visual feedback
                     animateButtonPress(true)
@@ -176,21 +189,33 @@ class FloatingButtonService : Service() {
                     if (distance > CLICK_DRAG_TOLERANCE && !isDragging) {
                         isDragging = true
                         hasMoved = true
+                        
+                        // Determine the primary direction of movement
+                        val absX = kotlin.math.abs(deltaX)
+                        val absY = kotlin.math.abs(deltaY)
+                        
+                        if (absY > VERTICAL_DRAG_THRESHOLD && absY > absX) {
+                            // Primarily vertical movement - user is repositioning
+                            isRepositioning = true
+                            Log.d(TAG, "Started repositioning (vertical drag) - deltaX: $deltaX, deltaY: $deltaY")
+                        } else {
+                            Log.d(TAG, "Started dragging (potential inward) - deltaX: $deltaX, deltaY: $deltaY")
+                        }
                     }
 
                     if (isDragging) {
-                        // Update position during drag
-                        layoutParams.x = (initialX + deltaX).toInt()
+                        // Always allow vertical movement for repositioning
                         layoutParams.y = (initialY + deltaY).toInt()
                         
-                        // Keep within screen bounds
-                        layoutParams.x = max(-HIDDEN_OFFSET, min(screenWidth - 48 + HIDDEN_OFFSET, layoutParams.x))
-                        layoutParams.y = max(0, min(screenHeight - 48, layoutParams.y))
+                        // Keep within screen bounds vertically
+                        layoutParams.y = max(0, min(screenHeight - BUTTON_HEIGHT, layoutParams.y))
                         
                         windowManager.updateViewLayout(floatingButtonView, layoutParams)
                         
-                        // Check for drag inward gesture
-                        checkDragInward(deltaX, deltaY)
+                        // Only check for inward drag if NOT repositioning
+                        if (!isRepositioning) {
+                            checkDragInward(deltaX)
+                        }
                     }
                     
                     return@setOnTouchListener true
@@ -200,17 +225,20 @@ class FloatingButtonService : Service() {
                     animateButtonPress(false)
                     
                     if (!hasMoved) {
-                        // It's a tap/click
-                        Log.d(TAG, "Button tapped")
-                        launchFloatingWindow()
-                    } else if (isDragging) {
-                        // End of drag - snap to nearest edge
-                        snapToEdge()
+                        // It's a tap/click - launch window only if not already launched
+                        if (!isWindowLaunched) {
+                            Log.d(TAG, "Button tapped")
+                            launchFloatingWindow()
+                        } else {
+                            Log.d(TAG, "Button tapped but window already launched")
+                        }
                     }
+                    // Note: If dragged inward, window is already launched by checkDragInward()
                     
                     // Reset states
                     isDragging = false
                     hasMoved = false
+                    isRepositioning = false
                     
                     // Restart auto-hide timer
                     startAutoHideTimer()
@@ -222,6 +250,7 @@ class FloatingButtonService : Service() {
                     animateButtonPress(false)
                     isDragging = false
                     hasMoved = false
+                    isRepositioning = false
                     startAutoHideTimer()
                     return@setOnTouchListener true
                 }
@@ -233,11 +262,12 @@ class FloatingButtonService : Service() {
     private fun animateButtonPress(pressed: Boolean) {
         if (pressed) {
             floatingButton.animate()
-                .scaleX(1.1f)
-                .scaleY(1.1f)
+                .scaleX(1.02f)
+                .scaleY(1.02f)
                 .setDuration(100)
                 .start()
                 
+            // Enhance icon visibility when pressed
             shortcutIcon.animate()
                 .alpha(1f)
                 .setDuration(100)
@@ -249,84 +279,79 @@ class FloatingButtonService : Service() {
                 .setDuration(100)
                 .start()
                 
+            // Return to expanded state alpha
             shortcutIcon.animate()
-                .alpha(0f)
+                .alpha(0.8f)
                 .setDuration(100)
                 .start()
         }
     }
 
-    private fun checkDragInward(deltaX: Float, deltaY: Float) {
-        val isOnLeftEdge = layoutParams.x <= EDGE_MARGIN
-        val isOnRightEdge = layoutParams.x >= screenWidth - 48 - EDGE_MARGIN
-        
-        val dragInwardThreshold = DRAG_INWARD_THRESHOLD
-        
-        if ((isOnLeftEdge && deltaX > dragInwardThreshold) || 
-            (isOnRightEdge && deltaX < -dragInwardThreshold)) {
-            
+    private fun checkDragInward(deltaX: Float) {
+        // Only trigger on rightward drag (inward from left edge) and not during repositioning
+        Log.d(TAG, "Checking drag inward - deltaX: $deltaX, threshold: $DRAG_INWARD_THRESHOLD, isRepositioning: $isRepositioning")
+        if (deltaX > DRAG_INWARD_THRESHOLD && !isWindowLaunched && !isRepositioning) {
             Log.d(TAG, "Drag inward detected - launching window")
             launchFloatingWindow()
             
-            // Reset position to prevent further triggers
+            // Reset dragging state to prevent further triggers
             isDragging = false
+            hasMoved = true // Mark as moved to prevent click action
         }
     }
 
-    private fun snapToEdge() {
-        val centerX = layoutParams.x + 24 // 24 is half of button width (48dp)
-        val snapToLeft = centerX < screenWidth / 2
-        
-        val targetX = if (snapToLeft) {
-            -HIDDEN_OFFSET
-        } else {
-            screenWidth - 48 + HIDDEN_OFFSET
-        }
-        
-        // Animate to edge
-        val currentX = layoutParams.x
-        val handler = Handler(Looper.getMainLooper())
-        
-        val animator = object : Runnable {
-            var step = 0
-            val totalSteps = 10
-            
-            override fun run() {
-                if (step < totalSteps) {
-                    val progress = step.toFloat() / totalSteps
-                    // Ease out animation
-                    val easedProgress = 1 - (1 - progress) * (1 - progress)
-                    
-                    layoutParams.x = (currentX + (targetX - currentX) * easedProgress).toInt()
-                    windowManager.updateViewLayout(floatingButtonView, layoutParams)
-                    
-                    step++
-                    handler.postDelayed(this, 16) // ~60fps
-                } else {
-                    layoutParams.x = targetX
-                    windowManager.updateViewLayout(floatingButtonView, layoutParams)
-                }
-            }
-        }
-        
-        handler.post(animator)
-    }
-
-    private fun showButton() {
-        val isOnLeftEdge = layoutParams.x <= 0
-        val targetX = if (isOnLeftEdge) EDGE_MARGIN else screenWidth - 48 - EDGE_MARGIN
-        
-        floatingButton.animate()
-            .translationX((targetX - layoutParams.x).toFloat())
+    private fun expandButton() {
+        // Show expanded background with light color
+        expandedBackground.visibility = View.VISIBLE
+        expandedBackground.animate()
+            .alpha(1f)
+            .scaleX(1.5f) // Expand width
             .setDuration(200)
             .start()
+            
+        // Hide the transparent background
+        circleBackground.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .start()
+            
+        // Show icon with better visibility
+        shortcutIcon.animate()
+            .alpha(0.8f)
+            .setDuration(200)
+            .start()
+            
+        // Move button slightly more visible
+        layoutParams.x = -HIDDEN_OFFSET / 3
+        windowManager.updateViewLayout(floatingButtonView, layoutParams)
     }
 
     private fun hideToEdge() {
-        floatingButton.animate()
-            .translationX(0f)
+        // Hide expanded background and show transparent one
+        expandedBackground.animate()
+            .alpha(0f)
+            .scaleX(1f)
+            .setDuration(300)
+            .withEndAction {
+                expandedBackground.visibility = View.GONE
+            }
+            .start()
+            
+        // Show transparent background
+        circleBackground.animate()
+            .alpha(1f)
             .setDuration(300)
             .start()
+            
+        // Hide icon
+        shortcutIcon.animate()
+            .alpha(0f)
+            .setDuration(300)
+            .start()
+            
+        // Move button back to mostly hidden position
+        layoutParams.x = -HIDDEN_OFFSET
+        windowManager.updateViewLayout(floatingButtonView, layoutParams)
     }
 
     private fun startAutoHideTimer() {
@@ -334,27 +359,78 @@ class FloatingButtonService : Service() {
         hideHandler.postDelayed(autoHideRunnable, AUTO_HIDE_DELAY)
     }
 
-    private fun cancelAutoHide() {
-        hideHandler.removeCallbacks(autoHideRunnable)
+    private fun startWindowStateChecker() {
+        // Check periodically if the FloatingWindowActivity is still running
+        val handler = Handler(Looper.getMainLooper())
+        val checker = object : Runnable {
+            override fun run() {
+                if (isWindowLaunched && !isFloatingWindowActivityRunning()) {
+                    Log.d(TAG, "FloatingWindowActivity closed, resetting state")
+                    isWindowLaunched = false
+                } else if (isWindowLaunched) {
+                    // Continue checking every 2 seconds while window is supposed to be open
+                    handler.postDelayed(this, 2000)
+                }
+            }
+        }
+        handler.postDelayed(checker, 2000)
+    }
+    
+    private fun isFloatingWindowActivityRunning(): Boolean {
+        val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        val runningTasks = activityManager.getRunningTasks(10)
+        
+        for (task in runningTasks) {
+            if (task.topActivity?.className == "com.example.shortcutdemo.FloatingWindowActivity") {
+                return true
+            }
+        }
+        return false
+    }
+    
+    // Public method that can be called by FloatingWindowActivity when it closes
+    fun onFloatingWindowClosed() {
+        Log.d(TAG, "FloatingWindowActivity reported closure")
+        isWindowLaunched = false
     }
 
     private fun launchFloatingWindow() {
         try {
+            if (isWindowLaunched) {
+                Log.d(TAG, "Window already launched, ignoring request")
+                return
+            }
+            
             val intent = Intent(this, FloatingWindowActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP
             startActivity(intent)
+            isWindowLaunched = true
             Log.d(TAG, "FloatingWindowActivity launched")
+            
+            // Start checking for window closure
+            startWindowStateChecker()
         } catch (e: Exception) {
             Log.e(TAG, "Error launching FloatingWindowActivity", e)
+            isWindowLaunched = false
         }
     }
 
+    private fun cancelAutoHide() {
+        hideHandler.removeCallbacks(autoHideRunnable)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Handle window closed notification
+        if (intent?.getBooleanExtra("window_closed", false) == true) {
+            onFloatingWindowClosed()
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        super.onCreate()
         Log.d(TAG, "FloatingButtonService destroyed")
         cancelAutoHide()
         
