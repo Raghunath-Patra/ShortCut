@@ -1,7 +1,9 @@
 package com.example.shortcutdemo
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,11 +12,14 @@ import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val OVERLAY_PERMISSION_REQ_CODE = 1234
+        private const val AUDIO_PERMISSION_REQ_CODE = 5678
         private const val TAG = "MainActivity"
     }
 
@@ -30,15 +35,53 @@ class MainActivity : AppCompatActivity() {
         logPermissionStatus()
 
         createShortcutBtn.setOnClickListener {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                requestOverlayPermission()
-            } else {
-                startFloatingButtonService()
-            }
+            checkAndRequestPermissions()
         }
 
         removeShortcutBtn.setOnClickListener {
             stopFloatingButtonService()
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        val missingPermissions = mutableListOf<String>()
+        
+        // Check overlay permission
+        val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(this)
+        } else {
+            true
+        }
+        
+        // Check audio permission
+        val hasAudioPermission = ContextCompat.checkSelfPermission(
+            this, 
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        Log.d(TAG, "Overlay permission: $hasOverlayPermission, Audio permission: $hasAudioPermission")
+
+        when {
+            !hasOverlayPermission -> {
+                requestOverlayPermission()
+            }
+            !hasAudioPermission -> {
+                requestAudioPermission()
+            }
+            else -> {
+                startFloatingButtonService()
+            }
+        }
+    }
+
+    private fun requestAudioPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                AUDIO_PERMISSION_REQ_CODE
+            )
+            Toast.makeText(this, "Please grant microphone permission for system audio capture", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -48,7 +91,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             true
         }
+        
+        val hasAudioPermission = ContextCompat.checkSelfPermission(
+            this, 
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
         Log.d(TAG, "Overlay permission status: $hasOverlayPermission")
+        Log.d(TAG, "Audio permission status: $hasAudioPermission")
     }
 
     private fun requestOverlayPermission() {
@@ -85,7 +135,6 @@ class MainActivity : AppCompatActivity() {
             stopService(Intent(this, FloatingButtonService::class.java))
 
             // Also stop any running screen recording service
-            //stopService(Intent(this, ScreenRecordingService::class.java))
             stopService(Intent(this, ScreenRecordService::class.java))
 
             Toast.makeText(this, "Floating shortcut removed", Toast.LENGTH_SHORT).show()
@@ -109,9 +158,30 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Overlay permission after request: $hasPermission")
 
                 if (hasPermission) {
-                    startFloatingButtonService()
+                    // Check audio permission after overlay permission is granted
+                    checkAndRequestPermissions()
                 } else {
                     Toast.makeText(this, "Permission denied. The floating shortcut won't work without this permission.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        
+        when (requestCode) {
+            AUDIO_PERMISSION_REQ_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Log.d(TAG, "Audio permission granted")
+                    startFloatingButtonService()
+                } else {
+                    Log.d(TAG, "Audio permission denied")
+                    Toast.makeText(this, "Audio permission is required for system audio recording", Toast.LENGTH_LONG).show()
                 }
             }
         }
