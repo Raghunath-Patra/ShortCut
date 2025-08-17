@@ -3,6 +3,7 @@ package com.example.shortcutdemo
 import android.Manifest
 import android.app.Service
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -16,7 +17,9 @@ import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
@@ -29,12 +32,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class ScreenRecordService: Service() {
 
@@ -42,7 +46,16 @@ class ScreenRecordService: Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var audioRecord: AudioRecord? = null
     private var audioRecordingJob: Job? = null
-    private var isAudioRecording = false
+    
+    // Interval recording variables
+    private val intervalHandler = Handler(Looper.getMainLooper())
+    private var intervalRunnable: Runnable? = null
+    private val recordingSegmentNumber = AtomicInteger(0)
+    private var savedMediaProjectionConfig: ScreenRecordConfig? = null
+    private val isIntervalRecording = AtomicBoolean(false)
+    
+    // Use AtomicBoolean for thread-safe audio recording state
+    private val isAudioRecording = AtomicBoolean(false)
     
     private val mediaRecorder by lazy {
         if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -54,13 +67,9 @@ class ScreenRecordService: Service() {
     }
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val videoOutputFile by lazy {
-        File(cacheDir, "screen_video_${System.currentTimeMillis()}.mp4")
-    }
-    
-    private val audioOutputFile by lazy {
-        File(cacheDir, "screen_audio_${System.currentTimeMillis()}.pcm")
-    }
+    // Current recording files (will change for each interval)
+    private var currentVideoFile: File? = null
+    private var currentAudioFile: File? = null
 
     private val mediaProjectionManager by lazy {
         getSystemService<MediaProjectionManager>()
@@ -70,41 +79,89 @@ class ScreenRecordService: Service() {
         override fun onStop() {
             super.onStop()
             Log.d(TAG, "MediaProjection stopped")
-            releaseResources()
-            stopService()
-            saveToGallery()
+            
+            // Only stop everything if user manually stopped AND we're not in interval recording mode
+            if (!isIntervalRecording.get()) {
+                releaseResources()
+                stopService()
+                saveCurrentRecordingToGallery()
+            } else {
+                Log.d(TAG, "MediaProjection stopped during interval transition - this is expected")
+            }
         }
     }
 
-    private fun saveToGallery() {
+    private fun savePreviousSegmentToGallery(videoFile: File, audioFile: File?, segmentNumber: Int) {
+        try {
+            val timestamp = System.currentTimeMillis()
+            
+            // Save video file
+            if (videoFile.exists() && videoFile.length() > 0) {
+                saveVideoToGallery(videoFile, timestamp, segmentNumber)
+                Log.d(TAG, "Previous video segment $segmentNumber saved to gallery")
+            } else {
+                Log.w(TAG, "Previous video file is empty or doesn't exist for segment $segmentNumber")
+            }
+            
+            // Save audio file if it exists and has content
+            if (audioFile?.exists() == true && audioFile.length() > 0) {
+                saveAudioToGallery(audioFile, timestamp, segmentNumber)
+                Log.d(TAG, "Previous audio segment $segmentNumber saved to gallery")
+            } else {
+                Log.d(TAG, "No previous audio file to save for segment $segmentNumber")
+            }
+            
+            // Clean up the saved files
+            cleanupSegmentFiles(videoFile, audioFile)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving previous segment files to gallery", e)
+        }
+    }
+
+    private fun saveCurrentRecordingToGallery() {
+        val videoFile = currentVideoFile
+        val audioFile = currentAudioFile
+        
+        if (videoFile == null) {
+            Log.w(TAG, "No video file to save")
+            return
+        }
+        
         serviceScope.launch {
             try {
                 val timestamp = System.currentTimeMillis()
+                val segmentNum = recordingSegmentNumber.get()
                 
                 // Save video file
-                saveVideoToGallery(timestamp)
-                
-                // Save audio file if it exists
-                if (audioOutputFile.exists() && audioOutputFile.length() > 0) {
-                    saveAudioToGallery(timestamp)
-                    Log.d(TAG, "Both video and audio files saved")
+                if (videoFile.exists() && videoFile.length() > 0) {
+                    saveVideoToGallery(videoFile, timestamp, segmentNum)
+                    Log.d(TAG, "Video segment $segmentNum saved to gallery")
                 } else {
-                    Log.d(TAG, "Only video file saved (no audio recorded)")
+                    Log.w(TAG, "Video file is empty or doesn't exist for segment $segmentNum")
                 }
                 
-                // Clean up temporary files
-                cleanupTempFiles()
+                // Save audio file if it exists and has content
+                if (audioFile?.exists() == true && audioFile.length() > 0) {
+                    saveAudioToGallery(audioFile, timestamp, segmentNum)
+                    Log.d(TAG, "Audio segment $segmentNum saved to gallery")
+                } else {
+                    Log.d(TAG, "No audio file to save for segment $segmentNum")
+                }
+                
+                // Clean up the saved files
+                cleanupSegmentFiles(videoFile, audioFile)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error saving files to gallery", e)
+                Log.e(TAG, "Error saving segment files to gallery", e)
             }
         }
     }
     
-    private suspend fun saveVideoToGallery(timestamp: Long) {
+    private fun saveVideoToGallery(videoFile: File, timestamp: Long, segmentNumber: Int) {
         try {
             val videoValues = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, "screen_video_$timestamp.mp4")
+                put(MediaStore.Video.Media.DISPLAY_NAME, "screen_video_${timestamp}_seg${segmentNumber}.mp4")
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/ScreenRecordings")
@@ -120,7 +177,7 @@ class ScreenRecordService: Service() {
 
             contentResolver.insert(videoCollection, videoValues)?.let { uri ->
                 contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    FileInputStream(videoOutputFile).use { inputStream ->
+                    FileInputStream(videoFile).use { inputStream ->
                         inputStream.copyTo(outputStream)
                     }
                 }
@@ -132,26 +189,26 @@ class ScreenRecordService: Service() {
                     contentResolver.update(uri, videoValues, null, null)
                 }
                 
-                Log.d(TAG, "Video saved to gallery successfully")
+                Log.d(TAG, "Video segment $segmentNumber saved to gallery successfully")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving video to gallery", e)
+            Log.e(TAG, "Error saving video segment $segmentNumber to gallery", e)
         }
     }
     
-    private suspend fun saveAudioToGallery(timestamp: Long) {
+    private fun saveAudioToGallery(audioFile: File, timestamp: Long, segmentNumber: Int) {
         try {
             // Convert PCM to WAV first
-            val wavFile = File(cacheDir, "screen_audio_$timestamp.wav")
-            val conversionSuccess = AudioConverter.convertPcmToWav(audioOutputFile, wavFile)
+            val wavFile = File(cacheDir, "screen_audio_${timestamp}_seg${segmentNumber}.wav")
+            val conversionSuccess = AudioConverter.convertPcmToWav(audioFile, wavFile)
             
             if (!conversionSuccess) {
-                Log.e(TAG, "Failed to convert PCM to WAV")
+                Log.e(TAG, "Failed to convert PCM to WAV for segment $segmentNumber")
                 return
             }
 
             val audioValues = ContentValues().apply {
-                put(MediaStore.Audio.Media.DISPLAY_NAME, "screen_audio_$timestamp.wav")
+                put(MediaStore.Audio.Media.DISPLAY_NAME, "screen_audio_${timestamp}_seg${segmentNumber}.wav")
                 put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/ScreenRecordings")
@@ -179,8 +236,7 @@ class ScreenRecordService: Service() {
                     contentResolver.update(uri, audioValues, null, null)
                 }
                 
-                Log.d(TAG, "Audio saved to gallery successfully as WAV")
-                Log.d(TAG, AudioConverter.getAudioFileInfo(wavFile))
+                Log.d(TAG, "Audio segment $segmentNumber saved to gallery successfully as WAV")
             }
             
             // Clean up the temporary WAV file
@@ -188,22 +244,175 @@ class ScreenRecordService: Service() {
                 wavFile.delete()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving audio to gallery", e)
+            Log.e(TAG, "Error saving audio segment $segmentNumber to gallery", e)
         }
     }
     
-    private fun cleanupTempFiles() {
+    private fun cleanupSegmentFiles(videoFile: File?, audioFile: File?) {
         try {
-            if (videoOutputFile.exists()) {
-                videoOutputFile.delete()
-                Log.d(TAG, "Temporary video file deleted")
+            videoFile?.let {
+                if (it.exists()) {
+                    val deleted = it.delete()
+                    Log.d(TAG, "Segment video file deleted: $deleted")
+                }
             }
-            if (audioOutputFile.exists()) {
-                audioOutputFile.delete()
-                Log.d(TAG, "Temporary audio file deleted")
+            audioFile?.let {
+                if (it.exists()) {
+                    val deleted = it.delete()
+                    Log.d(TAG, "Segment audio file deleted: $deleted")
+                }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error cleaning up temporary files", e)
+            Log.e(TAG, "Error cleaning up segment files", e)
+        }
+    }
+
+    private fun createNewSegmentFiles(): Pair<File, File> {
+        val segmentNum = recordingSegmentNumber.incrementAndGet()
+        val timestamp = System.currentTimeMillis()
+        
+        val videoFile = File(cacheDir, "screen_video_${timestamp}_seg${segmentNum}.mp4")
+        val audioFile = File(cacheDir, "screen_audio_${timestamp}_seg${segmentNum}.pcm")
+        
+        return Pair(videoFile, audioFile)
+    }
+
+    private fun setupIntervalRecording() {
+        cancelIntervalRecording() // Cancel any existing interval
+        
+        intervalRunnable = Runnable {
+            if (isIntervalRecording.get()) {
+                Log.d(TAG, "Starting next 30s recording segment")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startNextSegment()
+                }
+                setupIntervalRecording() // Schedule next interval
+            }
+        }
+        
+        intervalHandler.postDelayed(intervalRunnable!!, RECORDING_INTERVAL_MS)
+        Log.d(TAG, "Scheduled next recording segment in ${RECORDING_INTERVAL_MS}ms")
+    }
+
+    private fun cancelIntervalRecording() {
+        intervalRunnable?.let {
+            intervalHandler.removeCallbacks(it)
+        }
+        intervalRunnable = null
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun startNextSegment() {
+        try {
+            Log.d(TAG, "Transitioning to next recording segment...")
+            
+            // Keep references to current files for background saving
+            val previousVideoFile = currentVideoFile
+            val previousAudioFile = currentAudioFile
+            val previousSegmentNumber = recordingSegmentNumber.get()
+            
+            // 1. Stop the current recording and release the old virtual display.
+            //    This is crucial to free up the resources for the next segment.
+            stopCurrentRecording()
+            
+            // 2. Create new file paths for the upcoming segment.
+            val (newVideoFile, newAudioFile) = createNewSegmentFiles()
+            currentVideoFile = newVideoFile
+            currentAudioFile = newAudioFile
+            
+            // 3. IMPORTANT: Do NOT create a new MediaProjection.
+            //    We will reuse the existing one created when the service started.
+            if (mediaProjection == null) {
+                Log.e(TAG, "MediaProjection is null, cannot start next segment.")
+                stopIntervalRecording()
+                return
+            }
+
+            // 4. Start the next recording segment using the new files and the
+            //    original, still-valid MediaProjection.
+            startRecordingSegment()
+            
+            // 5. In the background, save the completed segment to the gallery.
+            if (previousVideoFile != null) {
+                serviceScope.launch {
+                    savePreviousSegmentToGallery(previousVideoFile, previousAudioFile, previousSegmentNumber)
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error transitioning to next segment", e)
+            stopIntervalRecording()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun startRecordingSegment() {
+        try {
+            // Initialize video recorder with new file
+            if (!initializeVideoRecorder()) {
+                Log.e(TAG, "Failed to initialize video recorder for new segment")
+                stopIntervalRecording()
+                return
+            }
+
+            // Start audio recording if permission available (Android 10+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasAudioPermission()) {
+                startAudioRecording()
+                // Small delay to ensure audio recording starts properly
+                Thread.sleep(50)
+            }
+
+            // Start video recording
+            mediaRecorder.start()
+            Log.d(TAG, "Video recording started for segment ${recordingSegmentNumber.get()}")
+
+            virtualDisplay = createVirtualDisplay()
+            if (virtualDisplay == null) {
+                Log.e(TAG, "Failed to create virtual display for new segment")
+                stopIntervalRecording()
+                return
+            }
+            
+            // Update notification to show current segment
+            val updatedNotification = NotificationHelper.updateNotificationWithSegment(
+                applicationContext, 
+                recordingSegmentNumber.get()
+            )
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, updatedNotification)
+            
+            Log.d(TAG, "Recording segment ${recordingSegmentNumber.get()} started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting recording segment", e)
+            stopIntervalRecording()
+        }
+    }
+
+    private fun stopCurrentRecording() {
+        try {
+            // Stop audio recording
+            stopAudioRecording()
+            
+            // Stop video recording
+            try {
+                mediaRecorder.stop()
+                Log.d(TAG, "Video recording stopped for segment transition")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping video recording for segment", e)
+            }
+            
+            mediaRecorder.reset()
+            
+            // Release virtual display but keep MediaProjection
+            try {
+                virtualDisplay?.release()
+                virtualDisplay = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error releasing virtual display", e)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping current recording segment", e)
         }
     }
 
@@ -211,7 +420,7 @@ class ScreenRecordService: Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when(intent?.action) {
             START_RECORDING -> {
-                Log.d(TAG, "Starting screen recording service")
+                Log.d(TAG, "Starting screen recording service with intervals")
                 val notification = NotificationHelper.createNotification(applicationContext)
                 NotificationHelper.createNotificationChannel(applicationContext)
                 if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -224,18 +433,18 @@ class ScreenRecordService: Service() {
                     startForeground(NOTIFICATION_ID, notification)
                 }
                 _isServiceRunning.value = true
-                startRecording(intent)
+                startIntervalRecording(intent)
             }
             STOP_RECORDING -> {
-                Log.d(TAG, "Stopping screen recording service")
-                stopRecording()
+                Log.d(TAG, "Stopping interval screen recording service")
+                stopIntervalRecording()
             }
         }
         return START_STICKY
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun startRecording(intent: Intent) {
+    private fun startIntervalRecording(intent: Intent) {
         try {
             val config = if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(
@@ -253,6 +462,9 @@ class ScreenRecordService: Service() {
                 return
             }
 
+            // Save the config for reuse in subsequent segments
+            savedMediaProjectionConfig = config
+
             mediaProjection = config.data?.let {
                 mediaProjectionManager?.getMediaProjection(config.resultCode, it)
             }
@@ -265,34 +477,25 @@ class ScreenRecordService: Service() {
             
             mediaProjection?.registerCallback(mediaProjectionCallback, null)
 
-            // Start audio recording first (if permission available)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasAudioPermission()) {
-                startAudioRecording()
-            } else {
-                Log.w(TAG, "Audio permission not granted or Android version < 10, recording video only")
-            }
-
-            // Start video recording
-            if (!initializeVideoRecorder()) {
-                Log.e(TAG, "Failed to initialize video recorder")
-                stopService()
-                return
-            }
+            // Start interval recording
+            isIntervalRecording.set(true)
+            recordingSegmentNumber.set(0)
             
-            mediaRecorder.start()
-            Log.d(TAG, "Video recording started successfully")
-
-            virtualDisplay = createVirtualDisplay()
-            if (virtualDisplay == null) {
-                Log.e(TAG, "Failed to create virtual display")
-                stopRecording()
-                return
-            }
+            // Create initial files
+            val (videoFile, audioFile) = createNewSegmentFiles()
+            currentVideoFile = videoFile
+            currentAudioFile = audioFile
             
-            Log.d(TAG, "Screen recording started successfully ${if (isAudioRecording) "with" else "without"} system audio")
+            // Start first recording segment
+            startRecordingSegment()
+            
+            // Setup interval timer for subsequent segments
+            setupIntervalRecording()
+            
+            Log.d(TAG, "Interval screen recording started successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting recording", e)
-            stopRecording()
+            Log.e(TAG, "Error starting interval recording", e)
+            stopIntervalRecording()
         }
     }
 
@@ -303,6 +506,9 @@ class ScreenRecordService: Service() {
                 Log.e(TAG, "MediaProjection is null, cannot start audio recording")
                 return
             }
+
+            // Release previous AudioRecord if it exists
+            releaseAudioRecord()
 
             // Create AudioPlaybackCaptureConfiguration for system audio
             val audioPlaybackCaptureConfig = AudioPlaybackCaptureConfiguration.Builder(mediaProjection!!)
@@ -341,19 +547,19 @@ class ScreenRecordService: Service() {
 
             audioRecord?.let { record ->
                 record.startRecording()
-                isAudioRecording = true
+                isAudioRecording.set(true)
                 
                 // Start recording audio data in background
                 audioRecordingJob = serviceScope.launch {
                     recordAudioData(record)
                 }
                 
-                Log.d(TAG, "System audio recording started successfully")
+                Log.d(TAG, "System audio recording started for segment ${recordingSegmentNumber.get()}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start audio recording", e)
             audioRecord = null
-            isAudioRecording = false
+            isAudioRecording.set(false)
         }
     }
 
@@ -365,42 +571,56 @@ class ScreenRecordService: Service() {
         )
         val buffer = ByteArray(bufferSize)
         
+        val audioFile = currentAudioFile
+        if (audioFile == null) {
+            Log.e(TAG, "No audio file available for recording")
+            return
+        }
+        
         try {
-            FileOutputStream(audioOutputFile).use { outputStream ->
-                while (isActive && isAudioRecording) {
+            FileOutputStream(audioFile).use { outputStream ->
+                // Use the AtomicBoolean and check if the coroutine job is active
+                while (isAudioRecording.get() && audioRecordingJob?.isActive == true) {
                     val bytesRead = audioRecord.read(buffer, 0, buffer.size)
                     if (bytesRead > 0) {
                         outputStream.write(buffer, 0, bytesRead)
                     } else if (bytesRead == AudioRecord.ERROR_INVALID_OPERATION) {
                         Log.e(TAG, "Audio recording error: Invalid operation")
                         break
+                    } else if (bytesRead == AudioRecord.ERROR_BAD_VALUE) {
+                        Log.e(TAG, "Audio recording error: Bad value")
+                        break
                     }
                 }
             }
-            Log.d(TAG, "Audio recording completed, saved to: ${audioOutputFile.absolutePath}")
+            Log.d(TAG, "Audio recording completed for segment, saved to: ${audioFile.absolutePath}, size: ${audioFile.length()} bytes")
         } catch (e: IOException) {
             Log.e(TAG, "Error writing audio data", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error in audio recording", e)
         }
     }
 
-    private fun stopRecording() {
+    private fun stopIntervalRecording() {
         try {
-            Log.d(TAG, "Stopping recording...")
+            Log.d(TAG, "Stopping interval recording...")
             
-            // Stop video recording
-            mediaRecorder.stop()
-            mediaRecorder.reset()
+            isIntervalRecording.set(false)
+            cancelIntervalRecording()
             
-            // Stop audio recording
-            stopAudioRecording()
+            // Save current segment
+            saveCurrentRecordingToGallery()
+            
+            // Stop current recording
+            stopCurrentRecording()
             
             // Stop media projection
             mediaProjection?.stop()
             
-            Log.d(TAG, "Recording stopped successfully")
+            Log.d(TAG, "Interval recording stopped successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping recording", e)
-            // Still try to clean up
+            Log.e(TAG, "Error stopping interval recording", e)
+        } finally {
             releaseResources()
             stopService()
         }
@@ -408,12 +628,18 @@ class ScreenRecordService: Service() {
     
     private fun stopAudioRecording() {
         try {
-            isAudioRecording = false
+            isAudioRecording.set(false)
+            
+            // Cancel the audio recording job immediately
             audioRecordingJob?.cancel()
+            audioRecordingJob = null
             
             audioRecord?.let { record ->
                 try {
-                    record.stop()
+                    if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        record.stop()
+                    }
+                    // Don't release here during transitions, only release during full stop
                     Log.d(TAG, "Audio recording stopped")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error stopping audio recording", e)
@@ -421,6 +647,22 @@ class ScreenRecordService: Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in stopAudioRecording", e)
+        }
+    }
+
+    private fun releaseAudioRecord() {
+        try {
+            audioRecord?.let { record ->
+                try {
+                    record.release()
+                    audioRecord = null
+                    Log.d(TAG, "Audio recording released")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error releasing audio recording", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in releaseAudioRecord", e)
         }
     }
 
@@ -470,6 +712,12 @@ class ScreenRecordService: Service() {
     @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeVideoRecorder(): Boolean {
         return try {
+            val videoFile = currentVideoFile
+            if (videoFile == null) {
+                Log.e(TAG, "No video file available for recording")
+                return false
+            }
+            
             val (width, height) = getWindowSize()
             val (scaledWidth, scaledHeight) = getScaledDimensions(
                 maxWidth = width,
@@ -484,7 +732,7 @@ class ScreenRecordService: Service() {
                 
                 // Set output format (video only)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setOutputFile(videoOutputFile.absolutePath)
+                setOutputFile(videoFile.absolutePath)
 
                 // Configure video settings
                 setVideoSize(scaledWidth, scaledHeight)
@@ -493,7 +741,7 @@ class ScreenRecordService: Service() {
                 setVideoFrameRate(VIDEO_FRAME_RATE)
 
                 prepare()
-                Log.d(TAG, "Video recorder prepared successfully")
+                Log.d(TAG, "Video recorder prepared successfully for segment ${recordingSegmentNumber.get()}")
             }
             true
         } catch (e: Exception) {
@@ -515,7 +763,7 @@ class ScreenRecordService: Service() {
                 null,
                 null
             ).also {
-                Log.d(TAG, "Virtual display created successfully")
+                Log.d(TAG, "Virtual display created successfully for segment ${recordingSegmentNumber.get()}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error creating virtual display", e)
@@ -527,6 +775,8 @@ class ScreenRecordService: Service() {
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
         _isServiceRunning.value = false
+        isIntervalRecording.set(false)
+        cancelIntervalRecording()
         serviceScope.coroutineContext.cancelChildren()
         releaseResources()
     }
@@ -534,13 +784,28 @@ class ScreenRecordService: Service() {
     private fun releaseResources() {
         try {
             stopAudioRecording()
-            mediaRecorder.release()
-            audioRecord?.release()
-            virtualDisplay?.release()
-            mediaProjection?.unregisterCallback(mediaProjectionCallback)
-            mediaProjection = null
-            virtualDisplay = null
-            audioRecord = null
+            releaseAudioRecord()
+            
+            try {
+                mediaRecorder.release()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error releasing MediaRecorder", e)
+            }
+            
+            try {
+                virtualDisplay?.release()
+                virtualDisplay = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error releasing VirtualDisplay", e)
+            }
+            
+            try {
+                mediaProjection?.unregisterCallback(mediaProjectionCallback)
+                mediaProjection = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error releasing MediaProjection", e)
+            }
+            
             Log.d(TAG, "Resources released successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing resources", e)
@@ -563,6 +828,9 @@ class ScreenRecordService: Service() {
 
         // Audio configuration constants
         private const val AUDIO_SAMPLE_RATE = 44100 // 44.1 kHz
+        
+        // Interval recording constant
+        private const val RECORDING_INTERVAL_MS = 30_000L // 30 seconds
 
         const val START_RECORDING = "START_RECORDING"
         const val STOP_RECORDING = "STOP_RECORDING"
