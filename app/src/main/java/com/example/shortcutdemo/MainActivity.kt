@@ -28,6 +28,17 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.hide()
         setContentView(R.layout.activity_main)
 
+        // Initialize OpenCV (simplified approach)
+        OpenCVInitializer.initializeOpenCV { success ->
+            if (success) {
+                Log.d(TAG, "OpenCV initialized successfully")
+                Toast.makeText(this, "OpenCV ready for frame extraction", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.e(TAG, "OpenCV initialization failed")
+                Toast.makeText(this, "OpenCV initialization failed - will use fallback method", Toast.LENGTH_LONG).show()
+            }
+        }
+
         val createShortcutBtn = findViewById<Button>(R.id.createShortcutBtn)
         val removeShortcutBtn = findViewById<Button>(R.id.removeShortcutBtn)
 
