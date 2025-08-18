@@ -120,7 +120,7 @@ android {
             }
         }
     }
-    
+
     android {
         buildFeatures {
             buildConfig true
@@ -129,6 +129,10 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     buildTypes {
@@ -160,7 +164,7 @@ android {
             path (project.projectDir.toString() + '/libcxx_helper/CMakeLists.txt')
         }
     }
-    
+
     buildFeatures {
         prefabPublishing true
         buildConfig true
@@ -189,8 +193,8 @@ publishing {
             version = '4.12.0'
 
             afterEvaluate {
-               from components.release
-           }
+                from components.release
+            }
         }
     }
     repositories {

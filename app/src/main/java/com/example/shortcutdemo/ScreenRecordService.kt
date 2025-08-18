@@ -270,58 +270,33 @@ class ScreenRecordService: Service() {
         try {
             val timestamp = System.currentTimeMillis()
             
-            // Process video chunk with frame extraction
+            // Process video chunk with HashBasedFrameExtractor only
             if (videoFile != null && videoFile.exists() && videoFile.length() > 0) {
-                Log.d(TAG, "Processing video chunk $chunkNumber with frame extraction")
+                Log.d(TAG, "Processing video chunk $chunkNumber with hash-based frame extraction")
                 
-                // Check if OpenCV is ready, otherwise use simple extractor
-                if (OpenCVInitializer.isOpenCVReady()) {
-                    Log.d(TAG, "Using OpenCV-based frame extraction for chunk $chunkNumber")
-                    // Use OpenCV-based extractor
-                    val frameExtractor = HashBasedFrameExtractor()
-                    val result = frameExtractor.extractUniqueFrames(
-                        videoFile = videoFile,
-                        hashThreshold = 5,
-                        interval = 5,
-                        maxFrames = 50
+                // Use HashBasedFrameExtractor regardless of OpenCV status
+                val frameExtractor = HashBasedFrameExtractor()
+                val result = frameExtractor.extractUniqueFrames(
+                    videoFile = videoFile,
+                    hashThreshold = 5,
+                    interval = 5,
+                    maxFrames = 50
+                )
+                
+                Log.d(TAG, "Hash-based extraction results for chunk $chunkNumber:")
+                Log.d(TAG, "- Unique frames: ${result.uniqueFrames.size}")
+                Log.d(TAG, "- Processing time: ${result.processingTimeMs}ms")
+                
+                if (result.uniqueFrames.isNotEmpty()) {
+                    val savedCount = FrameSaver.saveFramesToGallery(
+                        context = applicationContext,
+                        frames = result.uniqueFrames,
+                        chunkNumber = chunkNumber,
+                        timestamp = timestamp
                     )
-                    
-                    Log.d(TAG, "OpenCV extraction results for chunk $chunkNumber:")
-                    Log.d(TAG, "- Unique frames: ${result.uniqueFrames.size}")
-                    Log.d(TAG, "- Processing time: ${result.processingTimeMs}ms")
-                    
-                    if (result.uniqueFrames.isNotEmpty()) {
-                        val savedCount = FrameSaver.saveFramesToGallery(
-                            context = applicationContext,
-                            frames = result.uniqueFrames,
-                            chunkNumber = chunkNumber,
-                            timestamp = timestamp
-                        )
-                        Log.d(TAG, "Saved $savedCount OpenCV-extracted frames for chunk $chunkNumber")
-                    }
+                    Log.d(TAG, "Saved $savedCount hash-extracted frames for chunk $chunkNumber")
                 } else {
-                    Log.d(TAG, "Using simple frame extraction for chunk $chunkNumber (OpenCV not available)")
-                    // Fallback to simple extractor
-                    val frameExtractor = SimpleFrameExtractor()
-                    val result = frameExtractor.extractUniqueFrames(
-                        videoFile = videoFile,
-                        intervalSeconds = 2,
-                        maxFrames = 50
-                    )
-                    
-                    Log.d(TAG, "Simple extraction results for chunk $chunkNumber:")
-                    Log.d(TAG, "- Unique frames: ${result.uniqueFrames.size}")
-                    Log.d(TAG, "- Processing time: ${result.processingTimeMs}ms")
-                    
-                    if (result.uniqueFrames.isNotEmpty()) {
-                        val savedCount = FrameSaver.saveFramesToGallery(
-                            context = applicationContext,
-                            frames = result.uniqueFrames,
-                            chunkNumber = chunkNumber,
-                            timestamp = timestamp
-                        )
-                        Log.d(TAG, "Saved $savedCount simple-extracted frames for chunk $chunkNumber")
-                    }
+                    Log.w(TAG, "No unique frames extracted for chunk $chunkNumber")
                 }
                 
                 // Clean up video file
@@ -340,9 +315,6 @@ class ScreenRecordService: Service() {
             }
             
             Log.d(TAG, "Chunk $chunkNumber processing completed")
-            
-            // TODO: In production, replace gallery saving with backend API call
-            // sendFramesToBackend(result.uniqueFrames, audioData, chunkNumber)
             
         } catch (e: Exception) {
             Log.e(TAG, "Error processing chunks", e)
